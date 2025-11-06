@@ -1,21 +1,20 @@
-// src/pages/DriverLoginPage.jsx - Driver Login UI (Same style as Staff Portal)
+// src/pages/DriverLoginPage.jsx - Driver Login UI (Code-based single field)
 import { useState, useEffect } from "react";
 import { COMPANY_NAME, getCompanyClass } from "../config/company";
 import { driverApi } from "../services/driverApi";
 
 function DriverLoginPage({ onLoginSuccess }) {
   const [formData, setFormData] = useState({
-    username: "",
-    password: "",
+    driverCode: "",
   });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Auto-fill username if remembered
+  // Auto-fill driver code if remembered
   useEffect(() => {
-    const savedUsername = localStorage.getItem("driver_username");
-    if (savedUsername) {
-      setFormData((prev) => ({ ...prev, username: savedUsername }));
+    const savedDriverCode = localStorage.getItem("driver_code");
+    if (savedDriverCode) {
+      setFormData((prev) => ({ ...prev, driverCode: savedDriverCode }));
     }
   }, []);
 
@@ -32,14 +31,11 @@ function DriverLoginPage({ onLoginSuccess }) {
     setError("");
 
     try {
-      const result = await driverApi.login(
-        formData.username,
-        formData.password
-      );
+      const result = await driverApi.login(formData.driverCode);
 
       if (result.success) {
-        // Save username for next time
-        localStorage.setItem("driver_username", formData.username);
+        // Save driver code for next time
+        localStorage.setItem("driver_code", formData.driverCode);
 
         // Save driver data
         localStorage.setItem("driver", JSON.stringify(result.data.driver));
@@ -81,44 +77,28 @@ function DriverLoginPage({ onLoginSuccess }) {
         <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-8">
             <div className="space-y-4">
-              {/* Username */}
+              {/* Driver Code */}
               <div>
                 <label
-                  htmlFor="username"
+                  htmlFor="driverCode"
                   className="block text-sm font-medium text-gray-700 mb-2"
                 >
-                  Username
+                  Driver Code
                 </label>
                 <input
-                  id="username"
-                  name="username"
+                  id="driverCode"
+                  name="driverCode"
                   type="text"
                   required
-                  value={formData.username}
+                  value={formData.driverCode}
                   onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors"
-                  placeholder="Enter your username"
+                  className="w-full px-4 py-3 text-lg border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-colors text-center"
+                  placeholder="Enter your driver code (e.g., DRV001)"
+                  autoComplete="off"
                 />
-              </div>
-
-              {/* Password */}
-              <div>
-                <label
-                  htmlFor="password"
-                  className="block text-sm font-medium text-gray-700 mb-2"
-                >
-                  Password
-                </label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  value={formData.password}
-                  onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 transition-colors"
-                  placeholder="Enter your password"
-                />
+                <p className="mt-2 text-xs text-gray-500 text-center">
+                  Enter the driver code provided by your administrator
+                </p>
               </div>
 
               {/* Error Message */}
@@ -132,7 +112,7 @@ function DriverLoginPage({ onLoginSuccess }) {
               <button
                 type="submit"
                 disabled={loading}
-                className={`w-full py-3 px-4 rounded-lg font-medium text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 ${
+                className={`w-full py-3 px-4 rounded-lg font-medium text-white transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
                   loading
                     ? "bg-gray-400 cursor-not-allowed"
                     : `${getCompanyClass("primary")} ${getCompanyClass(

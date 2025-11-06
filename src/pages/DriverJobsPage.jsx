@@ -10,23 +10,68 @@ import {
 
 function DriverJobsPage({ driver, onLogout, onViewDetail, onViewProfile }) {
   const [jobs, setJobs] = useState([]);
+  const [allJobs, setAllJobs] = useState([]); // Keep all jobs for counting
   const [counts, setCounts] = useState({});
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState("today"); // Changed default to "today"
+  const [selectedDate, setSelectedDate] = useState(""); // For date picker in "all" filter
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
     loadJobs();
-  }, [filter]);
+  }, [filter, selectedDate]);
 
   const loadJobs = async () => {
     try {
       setLoading(true);
       setError("");
-      const result = await driverApi.getMyJobs(filter);
+      const result = await driverApi.getMyJobs("all"); // Always fetch all jobs
 
       if (result.success) {
-        setJobs(result.data.jobs);
+        const allJobsData = result.data.jobs;
+        let filteredJobs = [...allJobsData];
+
+        // Filter by date on frontend
+        if (filter === "today") {
+          filteredJobs = filteredJobs.filter(
+            (job) => job.pickup_date && isToday(job.pickup_date)
+          );
+        } else if (filter === "tomorrow") {
+          filteredJobs = filteredJobs.filter(
+            (job) => job.pickup_date && isTomorrow(job.pickup_date)
+          );
+        } else if (filter === "all" && selectedDate) {
+          // Filter by selected date if provided
+          filteredJobs = filteredJobs.filter((job) => {
+            if (!job.pickup_date) return false;
+            const jobDate = new Date(job.pickup_date)
+              .toISOString()
+              .split("T")[0];
+            return jobDate === selectedDate;
+          });
+        }
+        // "all" without selectedDate shows everything
+
+        // Sort: completed jobs go to bottom
+        filteredJobs.sort((a, b) => {
+          // Completed jobs go last
+          if (
+            a.assignment_status === "completed" &&
+            b.assignment_status !== "completed"
+          )
+            return 1;
+          if (
+            a.assignment_status !== "completed" &&
+            b.assignment_status === "completed"
+          )
+            return -1;
+
+          // Otherwise keep time order (already sorted by API)
+          return 0;
+        });
+
+        setAllJobs(allJobsData); // Store all jobs for counting
+        setJobs(filteredJobs);
         setCounts(result.data.counts);
       } else {
         setError(result.error || "Failed to load jobs");
@@ -39,7 +84,16 @@ function DriverJobsPage({ driver, onLogout, onViewDetail, onViewProfile }) {
     }
   };
 
-  const getStatusBadge = (status) => {
+  const getStatusBadge = (status, isNoShow = false) => {
+    // If No Show, override with red badge
+    if (isNoShow) {
+      return (
+        <span className="px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+          No Show
+        </span>
+      );
+    }
+
     const badges = {
       assigned: "bg-blue-100 text-blue-800",
       in_progress: "bg-purple-100 text-purple-800",
@@ -115,42 +169,97 @@ function DriverJobsPage({ driver, onLogout, onViewDetail, onViewProfile }) {
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="bg-white border-b sticky top-0 z-10">
+      {/* Date Filter Tabs */}
+      <div className="bg-white border-b sticky top-0 z-10 shadow-sm">
         <div className="max-w-md mx-auto px-4">
-          <div className="flex gap-2 py-3 overflow-x-auto">
+          <div className="flex gap-2 py-3 pb-2">
             {[
-              { value: "all", label: "ทั้งหมด", count: counts.total_count },
-              { value: "assigned", label: "งานใหม่", count: counts.new_count },
-              {
-                value: "in_progress",
-                label: "กำลังทำ",
-                count: counts.in_progress_count,
-              },
-              {
-                value: "completed",
-                label: "เสร็จแล้ว",
-                count: counts.completed_count,
-              },
-            ].map((tab) => (
-              <button
-                key={tab.value}
-                onClick={() => setFilter(tab.value)}
-                className={`px-4 py-2 rounded-lg font-medium text-sm whitespace-nowrap transition-colors ${
-                  filter === tab.value
-                    ? `${getCompanyClass("primary")} text-white`
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                }`}
-              >
-                {tab.label}
-                {tab.count > 0 && (
-                  <span className="ml-1.5 px-1.5 py-0.5 bg-white/20 rounded-full text-xs">
-                    {tab.count}
-                  </span>
-                )}
-              </button>
-            ))}
+              { value: "today", label: "วันนี้", icon: "calendar-day" },
+              { value: "tomorrow", label: "พรุ่งนี้", icon: "calendar-plus" },
+              { value: "all", label: "ทั้งหมด", icon: "list" },
+            ].map((tab) => {
+              // Count jobs for this filter from all jobs
+              let count = 0;
+              if (tab.value === "today") {
+                count = allJobs.filter(
+                  (job) => job.pickup_date && isToday(job.pickup_date)
+                ).length;
+              } else if (tab.value === "tomorrow") {
+                count = allJobs.filter(
+                  (job) => job.pickup_date && isTomorrow(job.pickup_date)
+                ).length;
+              } else if (tab.value === "all") {
+                if (selectedDate) {
+                  count = allJobs.filter((job) => {
+                    if (!job.pickup_date) return false;
+                    const jobDate = new Date(job.pickup_date)
+                      .toISOString()
+                      .split("T")[0];
+                    return jobDate === selectedDate;
+                  }).length;
+                } else {
+                  count = allJobs.length;
+                }
+              }
+
+              return (
+                <button
+                  key={tab.value}
+                  onClick={() => setFilter(tab.value)}
+                  className={`flex-1 px-3 py-2.5 rounded-lg font-medium text-sm transition-all ${
+                    filter === tab.value
+                      ? `${getCompanyClass("primary")} text-white shadow-md`
+                      : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                  }`}
+                >
+                  <div className="flex flex-col items-center gap-1">
+                    <div className="flex items-center gap-1.5">
+                      <i className={`fas fa-${tab.icon} text-sm`}></i>
+                      <span>{tab.label}</span>
+                    </div>
+                    <span
+                      className={`text-xs font-bold ${
+                        filter === tab.value ? "text-white/90" : "text-gray-500"
+                      }`}
+                    >
+                      {count} งาน
+                    </span>
+                  </div>
+                </button>
+              );
+            })}
           </div>
+
+          {/* Date Picker - Show only when "all" filter is selected */}
+          {filter === "all" && (
+            <div className="pb-3">
+              <div className="flex items-center gap-2">
+                <label
+                  htmlFor="date-picker"
+                  className="text-sm text-gray-600 flex items-center gap-1.5"
+                >
+                  <i className="fas fa-calendar text-gray-500"></i>
+                  เลือกวันที่:
+                </label>
+                <input
+                  id="date-picker"
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+                {selectedDate && (
+                  <button
+                    onClick={() => setSelectedDate("")}
+                    className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+                    title="ล้างการเลือก"
+                  >
+                    <i className="fas fa-times"></i>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -158,7 +267,7 @@ function DriverJobsPage({ driver, onLogout, onViewDetail, onViewProfile }) {
       <div className="max-w-md mx-auto p-4 space-y-3">
         {loading && (
           <div className="text-center py-8">
-            <div className="inline-block w-8 h-8 border-4 border-gray-200 border-t-cyan-600 rounded-full animate-spin"></div>
+            <div className="inline-block w-8 h-8 border-4 border-gray-200 border-t-blue-600 rounded-full animate-spin"></div>
             <p className="text-gray-500 mt-2">กำลังโหลด...</p>
           </div>
         )}
@@ -198,145 +307,165 @@ function DriverJobsPage({ driver, onLogout, onViewDetail, onViewProfile }) {
 
         {!loading &&
           !error &&
-          jobs.map((job) => (
-            <div
-              key={job.booking_ref}
-              onClick={() => onViewDetail(job.booking_ref)}
-              className="bg-white rounded-xl border border-gray-200 p-4 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
-            >
-              {/* Header */}
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1">
-                  <h3 className="font-bold text-gray-900 mb-1">
-                    {job.passenger_name}
-                  </h3>
-                  <p className="text-xs text-gray-500">{job.booking_ref}</p>
-                </div>
-                {getStatusBadge(job.assignment_status)}
-              </div>
+          jobs.map((job, index) => {
+            // Check if time was changed
+            const hasTimeChange =
+              job.pickup_date_adjusted && job.pickup_date_original;
 
-              {/* Details */}
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center text-gray-700">
-                  <svg
-                    className="w-4 h-4 mr-2 text-gray-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"
-                    />
-                  </svg>
-                  <span className="font-medium">
-                    {formatDate(job.pickup_date, "ยังไม่กำหนด")}
-                  </span>
-                </div>
+            // Format pickup time
+            const pickupTime = job.pickup_date
+              ? new Date(job.pickup_date).toLocaleTimeString("th-TH", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : "-";
 
-                <div className="flex items-start text-gray-700">
-                  <svg
-                    className="w-4 h-4 mr-2 mt-0.5 text-green-500"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                  <span className="flex-1">
-                    {job.accommodation_name || job.resort || "ไม่ระบุ"}
-                  </span>
-                </div>
+            const pickupTimeOriginal = hasTimeChange
+              ? new Date(job.pickup_date_original).toLocaleTimeString("th-TH", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })
+              : null;
 
-                <div className="flex items-start text-gray-700">
-                  <svg
-                    className="w-4 h-4 mr-2 mt-0.5 text-blue-500"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                    />
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                    />
-                  </svg>
-                  <span className="flex-1">{job.airport || "ไม่ระบุ"}</span>
-                </div>
+            // Full date in Thai with Buddhist Era year (พ.ศ.)
+            const fullDate = job.pickup_date
+              ? (() => {
+                  const date = new Date(job.pickup_date);
+                  const thaiWeekdays = [
+                    "อา.",
+                    "จ.",
+                    "อ.",
+                    "พ.",
+                    "พฤ.",
+                    "ศ.",
+                    "ส.",
+                  ];
+                  const thaiMonths = [
+                    "ม.ค.",
+                    "ก.พ.",
+                    "มี.ค.",
+                    "เม.ย.",
+                    "พ.ค.",
+                    "มิ.ย.",
+                    "ก.ค.",
+                    "ส.ค.",
+                    "ก.ย.",
+                    "ต.ค.",
+                    "พ.ย.",
+                    "ธ.ค.",
+                  ];
+                  const buddhistYear = date.getFullYear() + 543;
+                  return `${thaiWeekdays[date.getDay()]} ${date.getDate()} ${
+                    thaiMonths[date.getMonth()]
+                  } ${buddhistYear}`;
+                })()
+              : "ยังไม่กำหนด";
 
-                {job.flight_no_arrival && (
-                  <div className="flex items-center text-gray-600">
-                    <svg
-                      className="w-4 h-4 mr-2 text-gray-400"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
-                      />
-                    </svg>
-                    <span>เที่ยวบิน {job.flight_no_arrival}</span>
-                  </div>
-                )}
+            // Determine background color based on completion_type
+            const isNoShow = job.completion_type === "NO_SHOW"; // Driver marked as No Show
+            const isCompleted =
+              job.assignment_status === "completed" && !isNoShow;
 
-                <div className="flex items-center justify-between pt-2 border-t">
-                  <div className="flex items-center text-gray-600">
-                    <svg
-                      className="w-4 h-4 mr-1.5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"
-                      />
-                    </svg>
-                    <span>{job.pax_total} ท่าน</span>
-                  </div>
+            let bgColor = "bg-white";
+            if (isNoShow) {
+              bgColor = "bg-red-50"; // Red background for No Show (highest priority)
+            } else if (isCompleted) {
+              bgColor = "bg-green-50"; // Green background for completed
+            }
 
-                  {job.registration && (
-                    <div className="flex items-center text-gray-600">
-                      <svg
-                        className="w-4 h-4 mr-1.5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"
-                        />
-                      </svg>
-                      <span>{job.registration}</span>
+            return (
+              <div
+                key={job.booking_ref}
+                onClick={() => onViewDetail(job.booking_ref)}
+                className={`${bgColor} rounded-lg shadow-sm hover:shadow-md transition-shadow cursor-pointer p-3`}
+              >
+                {/* Header: ลำดับ + เวลา + Status */}
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex items-start gap-3 flex-1">
+                    {/* เลขลำดับงาน */}
+                    <div className="flex-shrink-0 w-8 h-8 bg-blue-700 text-white rounded-lg flex items-center justify-center text-sm font-bold shadow-sm">
+                      {index + 1}
                     </div>
+
+                    {/* เวลาและวันที่ */}
+                    <div className="flex-1">
+                      {hasTimeChange ? (
+                        <div className="flex items-baseline gap-2">
+                          <span className="text-xl font-bold text-orange-600">
+                            {pickupTime}
+                          </span>
+                          <span className="text-xs text-gray-400 line-through">
+                            {pickupTimeOriginal}
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="text-xl font-bold text-gray-900">
+                          {pickupTime}
+                        </div>
+                      )}
+                      <div className="text-xs text-gray-600 mt-0.5">
+                        {fullDate}
+                      </div>
+                    </div>
+                  </div>
+
+                  {getStatusBadge(job.assignment_status, isNoShow)}
+                </div>
+
+                {/* ชื่อผู้โดยสาร + จำนวนคน */}
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-semibold text-gray-900 text-sm truncate pr-2">
+                    {job.passenger_name}
+                  </span>
+                  <span className="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full whitespace-nowrap">
+                    <i className="fas fa-users text-xs mr-1"></i>
+                    {job.pax_total}
+                  </span>
+                </div>
+
+                {/* เส้นทาง: จุดรับ → จุดส่ง */}
+                <div className="space-y-1">
+                  <div className="flex items-start text-xs">
+                    <i className="fas fa-circle-dot text-green-500 mt-1 mr-2 flex-shrink-0"></i>
+                    <div className="flex-1 text-gray-700">
+                      {job.pickup_location || "ไม่ระบุ"}
+                      {job.flight_no_arrival && (
+                        <span className="text-blue-600 ml-1">
+                          ✈ {job.flight_no_arrival}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-start text-xs">
+                    <i className="fas fa-location-dot text-red-500 mt-1 mr-2 flex-shrink-0"></i>
+                    <div className="flex-1 text-gray-700">
+                      {job.dropoff_location || "ไม่ระบุ"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Booking Ref */}
+                <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-200">
+                  <span className="text-xs font-mono font-medium text-gray-600">
+                    <i className="fas fa-hashtag text-gray-400 mr-1"></i>
+                    {job.booking_ref}
+                  </span>
+                  {job.assignment_status !== "completed" && (
+                    <span className="text-xs font-medium text-blue-600 flex items-center gap-1">
+                      แตะเพื่อเริ่มงาน
+                      <i className="fas fa-chevron-right"></i>
+                    </span>
+                  )}
+                  {job.assignment_status === "completed" && (
+                    <span className="text-xs text-gray-400 flex items-center gap-1">
+                      ดูรายละเอียด
+                      <i className="fas fa-chevron-right"></i>
+                    </span>
                   )}
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
       </div>
     </div>
   );

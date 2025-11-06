@@ -35,9 +35,13 @@ try {
     $pdo = $db->getConnection();
 
     // Get job details with driver assignment
-    $sql = "SELECT 
+    $sql = "SELECT
                 b.*,
+                b.pickup_date as pickup_date_original,
+                b.pickup_date_adjusted,
+                COALESCE(b.pickup_date_adjusted, b.pickup_date) as pickup_date,
                 dva.status as assignment_status,
+                dva.completion_type,
                 dva.assigned_at,
                 v.registration,
                 v.brand,
@@ -73,6 +77,79 @@ try {
     if (!empty($job['raw_data'])) {
         $job['raw_data'] = json_decode($job['raw_data'], true);
     }
+
+    // === Calculate pickup and dropoff locations based on booking_type (same logic as tracking/info.php) ===
+    $bookingType = strtolower($job['booking_type'] ?? '');
+    $accommodation = $job['accommodation_name'] ?? $job['resort'] ?? '';
+    $airport = $job['airport'] ?? $job['from_airport'] ?? $job['to_airport'] ?? '';
+
+    $pickupLocation = '-';
+    $dropoffLocation = '-';
+
+    if (strpos($bookingType, 'arrival') !== false || !empty($job['arrival_date'])) {
+        // Arrival transfer: Airport -> Accommodation
+        $pickupLocation = $airport ?: 'Airport';
+        $dropoffLocation = $accommodation ?: 'Resort/Hotel';
+    } elseif (strpos($bookingType, 'departure') !== false || !empty($job['departure_date'])) {
+        // Departure transfer: Accommodation -> Airport
+        $pickupLocation = $accommodation ?: 'Resort/Hotel';
+        $dropoffLocation = $airport ?: 'Airport';
+    } elseif (strpos($bookingType, 'quote') !== false) {
+        // Quote transfer: Use pickup_address1 and dropoff_address1 if available
+        $pickupLocation = $job['pickup_address1'] ?? '';
+        $dropoffLocation = $job['dropoff_address1'] ?? '';
+
+        // If Quote addresses not available, try to determine from dates
+        if (empty($pickupLocation) && empty($dropoffLocation)) {
+            // If arrival_date exists, treat as arrival (Airport -> Accommodation)
+            if (!empty($job['arrival_date'])) {
+                $pickupLocation = $airport ?: 'Airport';
+                $dropoffLocation = $accommodation ?: 'Resort/Hotel';
+            }
+            // If departure_date exists, treat as departure (Accommodation -> Airport)
+            elseif (!empty($job['departure_date'])) {
+                $pickupLocation = $accommodation ?: 'Resort/Hotel';
+                $dropoffLocation = $airport ?: 'Airport';
+            }
+            // Use available location data
+            else {
+                if (!empty($accommodation) && !empty($airport)) {
+                    $pickupLocation = $accommodation;
+                    $dropoffLocation = $airport;
+                } elseif (!empty($accommodation)) {
+                    $pickupLocation = $accommodation;
+                    $dropoffLocation = 'Destination';
+                } elseif (!empty($airport)) {
+                    $pickupLocation = $airport;
+                    $dropoffLocation = 'Destination';
+                } else {
+                    $pickupLocation = '-';
+                    $dropoffLocation = '-';
+                }
+            }
+        }
+
+        // Fallback if still empty
+        if (empty($pickupLocation)) $pickupLocation = '-';
+        if (empty($dropoffLocation)) $dropoffLocation = '-';
+    } else {
+        // Default: Use available location data
+        if (!empty($accommodation) && !empty($airport)) {
+            // If both exist, default to departure direction
+            $pickupLocation = $accommodation;
+            $dropoffLocation = $airport;
+        } elseif (!empty($accommodation)) {
+            $pickupLocation = $accommodation;
+            $dropoffLocation = 'Destination';
+        } elseif (!empty($airport)) {
+            $pickupLocation = $airport;
+            $dropoffLocation = 'Destination';
+        }
+    }
+
+    // Add calculated fields to job data
+    $job['pickup_location'] = $pickupLocation;
+    $job['dropoff_location'] = $dropoffLocation;
 
     ob_end_clean();
 

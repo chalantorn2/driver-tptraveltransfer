@@ -31,6 +31,9 @@ try {
 
     $input = json_decode(file_get_contents('php://input'), true);
     $booking_ref = $input['booking_ref'] ?? '';
+    $status = $input['status'] ?? 'COMPLETED'; // COMPLETED or NO_SHOW
+    $latitude = $input['latitude'] ?? null;
+    $longitude = $input['longitude'] ?? null;
 
     if (empty($booking_ref)) {
         throw new Exception('Booking reference required');
@@ -45,7 +48,7 @@ try {
     $pdo->beginTransaction();
 
     // Check assignment
-    $checkSql = "SELECT id, status FROM driver_vehicle_assignments 
+    $checkSql = "SELECT id, status FROM driver_vehicle_assignments
                  WHERE booking_ref = :booking_ref AND driver_id = :driver_id";
     $checkStmt = $pdo->prepare($checkSql);
     $checkStmt->execute([
@@ -62,23 +65,40 @@ try {
         throw new Exception('Job already completed');
     }
 
-    if ($assignment['status'] !== 'in_progress') {
-        throw new Exception('Job must be in progress to complete');
-    }
-
     // Update assignment status to completed
-    $updateSql = "UPDATE driver_vehicle_assignments 
-                  SET status = 'completed' 
+    $updateSql = "UPDATE driver_vehicle_assignments
+                  SET status = 'completed',
+                      completed_at = NOW(),
+                      completion_latitude = :latitude,
+                      completion_longitude = :longitude
                   WHERE id = :id";
     $updateStmt = $pdo->prepare($updateSql);
-    $updateStmt->execute([':id' => $assignment['id']]);
+    $updateStmt->execute([
+        ':id' => $assignment['id'],
+        ':latitude' => $latitude,
+        ':longitude' => $longitude
+    ]);
 
-    // Update booking internal status
-    $updateBookingSql = "UPDATE bookings 
-                         SET internal_status = 'completed' 
-                         WHERE booking_ref = :booking_ref";
+    // Update booking based on status
+    if ($status === 'NO_SHOW') {
+        // Update to No Show status
+        $updateBookingSql = "UPDATE bookings
+                             SET internal_status = 'completed',
+                                 ht_status = 'ANSH'
+                             WHERE booking_ref = :booking_ref";
+    } else {
+        // Update to Completed status
+        $updateBookingSql = "UPDATE bookings
+                             SET internal_status = 'completed',
+                                 ht_status = 'COMP'
+                             WHERE booking_ref = :booking_ref";
+    }
     $updateBookingStmt = $pdo->prepare($updateBookingSql);
     $updateBookingStmt->execute([':booking_ref' => $booking_ref]);
+
+    // TODO: Send update to Holiday Taxis API
+    // This should be implemented to sync the status with HT
+    // For now, we just update our database
 
     $pdo->commit();
 

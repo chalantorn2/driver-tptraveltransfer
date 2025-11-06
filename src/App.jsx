@@ -11,6 +11,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [currentPage, setCurrentPage] = useState("jobs"); // jobs, detail, profile
   const [selectedJobRef, setSelectedJobRef] = useState(null);
+  const [jobsPageKey, setJobsPageKey] = useState(Date.now()); // Force remount when returning
 
   useEffect(() => {
     checkAuth();
@@ -67,6 +68,7 @@ function App() {
   const handleBackToJobs = () => {
     setSelectedJobRef(null);
     setCurrentPage("jobs");
+    setJobsPageKey(Date.now()); // Force DriverJobsPage to remount and reload data
   };
 
   const handleViewProfile = () => {
@@ -101,6 +103,7 @@ function App() {
     <>
       {currentPage === "jobs" && (
         <DriverJobsPage
+          key={jobsPageKey}
           driver={driver}
           onLogout={handleLogout}
           onViewDetail={handleViewDetail}

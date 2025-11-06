@@ -1,5 +1,5 @@
 <?php
-// api/auth/driver-login.php - Driver Login API (Fixed v2)
+// api/auth/driver-login.php - Driver Login API (Code-based v3)
 
 // ⚠️ CRITICAL: Prevent any output before JSON
 error_reporting(0);
@@ -39,40 +39,37 @@ try {
         throw new Exception('Invalid JSON input');
     }
 
-    $username = trim($input['username'] ?? '');
-    $password = $input['password'] ?? '';
+    $driverCode = trim($input['driver_code'] ?? '');
 
     // Validate input
-    if (empty($username) || empty($password)) {
-        throw new Exception('Username and password are required');
+    if (empty($driverCode)) {
+        throw new Exception('Driver code is required');
     }
 
     // Connect to database
     $db = new Database();
     $pdo = $db->getConnection();
 
-    // Get driver by username
-    $sql = "SELECT id, username, password, name, phone_number, status 
-            FROM drivers 
-            WHERE username = :username";
+    // Get driver by code (or fallback to ID for backward compatibility)
+    $sql = "SELECT id, username, name, phone_number, status, code
+            FROM drivers
+            WHERE code = :driver_code OR id = :driver_id";
 
     $stmt = $pdo->prepare($sql);
-    $stmt->execute([':username' => $username]);
+    $stmt->execute([
+        ':driver_code' => $driverCode,
+        ':driver_id' => is_numeric($driverCode) ? intval($driverCode) : 0
+    ]);
     $driver = $stmt->fetch(PDO::FETCH_ASSOC);
 
     // Check if driver exists
     if (!$driver) {
-        throw new Exception('Invalid username or password');
+        throw new Exception('Invalid driver code');
     }
 
     // Check if driver is active
     if ($driver['status'] !== 'active') {
         throw new Exception('Your account is inactive. Please contact administrator.');
-    }
-
-    // Verify password
-    if (!password_verify($password, $driver['password'])) {
-        throw new Exception('Invalid username or password');
     }
 
     // Create session

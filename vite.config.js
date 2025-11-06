@@ -9,11 +9,25 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": {
-        target: "https://driver.tptraveltransfer.com", // ใช้ production server
+      // Proxy for tracking API (main tptraveltransfer.com server)
+      "/api/tracking": {
+        target: "https://www.tptraveltransfer.com",
         changeOrigin: true,
-        secure: true,
-        rewrite: (path) => path.replace(/^\/api/, "/api"),
+        secure: false,
+        rewrite: (path) => {
+          // Keep the path as-is, since tracking API is at /api/tracking on the server
+          return path;
+        },
+      },
+      // Proxy for driver API (driver.tptraveltransfer.com server)
+      "/api": {
+        target: "https://driver.tptraveltransfer.com",
+        changeOrigin: true,
+        secure: false,
+        rewrite: (path) => {
+          // Keep the path as-is
+          return path;
+        },
       },
     },
   },

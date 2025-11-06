@@ -41,22 +41,30 @@ try {
     }
 
     // Get jobs assigned to this driver
-    $sql = "SELECT 
+    $sql = "SELECT
                 b.booking_ref,
                 b.passenger_name,
                 b.passenger_phone,
                 b.pax_total,
-                b.pickup_date,
+                b.pickup_date as pickup_date_original,
+                b.pickup_date_adjusted,
+                COALESCE(b.pickup_date_adjusted, b.pickup_date) as pickup_date,
                 b.arrival_date,
                 b.departure_date,
+                b.booking_type,
                 b.airport,
                 b.accommodation_name,
                 b.resort,
+                b.pickup_address1,
+                b.dropoff_address1,
+                b.from_airport,
+                b.to_airport,
                 b.flight_no_arrival,
                 b.flight_no_departure,
                 b.ht_status,
                 b.internal_status,
                 dva.status as assignment_status,
+                dva.completion_type,
                 dva.assigned_at,
                 v.registration,
                 v.brand,
@@ -66,7 +74,7 @@ try {
             INNER JOIN bookings b ON dva.booking_ref = b.booking_ref
             LEFT JOIN vehicles v ON dva.vehicle_id = v.id
             WHERE $whereClause
-            ORDER BY b.pickup_date DESC";
+            ORDER BY COALESCE(b.pickup_date_adjusted, b.pickup_date) ASC";
 
     $stmt = $pdo->prepare($sql);
     $params = [':driver_id' => $driver_id];
@@ -77,6 +85,76 @@ try {
 
     $stmt->execute($params);
     $jobs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // === Calculate pickup and dropoff locations for each job (same logic as tracking/info.php) ===
+    foreach ($jobs as &$job) {
+        $bookingType = strtolower($job['booking_type'] ?? '');
+        $accommodation = $job['accommodation_name'] ?? $job['resort'] ?? '';
+        $airport = $job['airport'] ?? $job['from_airport'] ?? $job['to_airport'] ?? '';
+
+        $pickupLocation = '-';
+        $dropoffLocation = '-';
+
+        if (strpos($bookingType, 'arrival') !== false || !empty($job['arrival_date'])) {
+            // Arrival transfer: Airport -> Accommodation
+            $pickupLocation = $airport ?: 'Airport';
+            $dropoffLocation = $accommodation ?: 'Resort/Hotel';
+        } elseif (strpos($bookingType, 'departure') !== false || !empty($job['departure_date'])) {
+            // Departure transfer: Accommodation -> Airport
+            $pickupLocation = $accommodation ?: 'Resort/Hotel';
+            $dropoffLocation = $airport ?: 'Airport';
+        } elseif (strpos($bookingType, 'quote') !== false) {
+            // Quote transfer: Use pickup_address1 and dropoff_address1 if available
+            $pickupLocation = $job['pickup_address1'] ?? '';
+            $dropoffLocation = $job['dropoff_address1'] ?? '';
+
+            // If Quote addresses not available, try to determine from dates
+            if (empty($pickupLocation) && empty($dropoffLocation)) {
+                if (!empty($job['arrival_date'])) {
+                    $pickupLocation = $airport ?: 'Airport';
+                    $dropoffLocation = $accommodation ?: 'Resort/Hotel';
+                } elseif (!empty($job['departure_date'])) {
+                    $pickupLocation = $accommodation ?: 'Resort/Hotel';
+                    $dropoffLocation = $airport ?: 'Airport';
+                } else {
+                    if (!empty($accommodation) && !empty($airport)) {
+                        $pickupLocation = $accommodation;
+                        $dropoffLocation = $airport;
+                    } elseif (!empty($accommodation)) {
+                        $pickupLocation = $accommodation;
+                        $dropoffLocation = 'Destination';
+                    } elseif (!empty($airport)) {
+                        $pickupLocation = $airport;
+                        $dropoffLocation = 'Destination';
+                    } else {
+                        $pickupLocation = '-';
+                        $dropoffLocation = '-';
+                    }
+                }
+            }
+
+            // Fallback if still empty
+            if (empty($pickupLocation)) $pickupLocation = '-';
+            if (empty($dropoffLocation)) $dropoffLocation = '-';
+        } else {
+            // Default: Use available location data
+            if (!empty($accommodation) && !empty($airport)) {
+                $pickupLocation = $accommodation;
+                $dropoffLocation = $airport;
+            } elseif (!empty($accommodation)) {
+                $pickupLocation = $accommodation;
+                $dropoffLocation = 'Destination';
+            } elseif (!empty($airport)) {
+                $pickupLocation = $airport;
+                $dropoffLocation = 'Destination';
+            }
+        }
+
+        // Add calculated fields
+        $job['pickup_location'] = $pickupLocation;
+        $job['dropoff_location'] = $dropoffLocation;
+    }
+    unset($job); // Break reference
 
     // Count by status
     $countSql = "SELECT 
